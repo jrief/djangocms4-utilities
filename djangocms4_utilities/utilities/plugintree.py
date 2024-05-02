@@ -1,11 +1,13 @@
 import sys
 
 from django.conf import settings
+from django.contrib.contenttypes.models import ContentType
 
 from cms.models import PageContent
 from cms.models.placeholdermodel import Placeholder
 from django.core.management import color_style
 from django.core.management.base import OutputWrapper
+from django.db.models import Q
 
 stdout = OutputWrapper(sys.stdout)
 stdout.style = color_style()
@@ -140,24 +142,33 @@ def fix_tree(placeholder, language=None):
     placeholder._recalculate_plugin_positions(language)
 
 
-def get_draft_placeholders():
+def get_draft_placeholders(page_content=None):
     if "djangocms_versioning" in settings.INSTALLED_APPS:
-
-        placeholder = list(Placeholder.objects.filter(content_type=None))
-
         from djangocms_versioning.helpers import remove_published_where
+
+        content_type = ContentType.objects.get_for_model(PageContent)
+        query = Q(content_type=content_type)
+        if page_content:
+            query &= Q(object_id=page_content.id)
+        placeholder = list(Placeholder.objects.filter(query))
 
         # Get all draft PageContents (Ensure that we don't change any previously published
         # pages, allows us to use compare
-        page_contents = PageContent.objects.all()
+        if page_content is None:
+            page_contents = PageContent.objects.all()
+        else:
+            page_contents = PageContent.objects.filter(id=page_content.id)
         try:
             page_contents = remove_published_where(page_contents)
         except NotImplementedError:
-            page_contents = PageContent.admin_manager.all()
+            if page_content is None:
+                page_contents = PageContent.admin_manager.all()
+            else:
+                page_contents = PageContent.admin_manager.filter(page_id=page_content.page_id, language=page_content.language)
         page_contents = page_contents.filter(versions__state="draft")
 
         for page_content in page_contents:
-            placeholder += list(page_content.placeholders.all())
+            placeholder.extend(list(page_content.placeholders.all()))
 
         return placeholder
 
